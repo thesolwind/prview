@@ -1,0 +1,34 @@
+{
+  "name": "prview",
+  "version": "0.1.0",
+  "description": "GitHub-style diff reviewer for the terminal, with viewed-state and line notes",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "prview": "./dist/cli.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "node scripts/build.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "start": "npm run build && node dist/cli.js",
+    "test": "node scripts/test.mjs",
+    "clean": "git clean -fdX",
+    "preview": "node scripts/build.mjs --preview && node dist/preview.js"
+  },
+  "dependencies": {
+    "ink": "^5.1.0",
+    "react": "^18.3.1",
+    "shiki": "^1.24.2",
+    "string-width": "^7.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/react": "^18.3.17",
+    "esbuild": "^0.24.2",
+    "typescript": "^5.7.2"
+  }
+}
