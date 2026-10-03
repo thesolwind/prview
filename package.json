@@ -1,7 +1,7 @@
 {
   "name": "@thesolwind/prview",
-  "version": "0.1.0",
-  "description": "GitHub-style diff reviewer for the terminal, with viewed-state and line notes",
+  "version": "0.1.1",
+  "description": "GitHub-style diff reviewer for the terminal, with AI summaries, review notes from Claude Code, viewed-state and line notes",
   "keywords": [
     "diff",
     "git",

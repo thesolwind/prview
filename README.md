@@ -1,9 +1,13 @@
 # prview
 
-**A GitHub-style diff reviewer for your terminal.** Split-pane view, syntax
-colours that match GitHub exactly, and unlike a pager, it remembers your
-review — which files you've looked at, and the notes you left on specific
-lines.
+**A GitHub-style diff reviewer for your terminal, built for reviewing what
+your AI agent just changed.** Split-pane view, syntax colours that match
+GitHub exactly, and unlike a pager, it remembers your review — which files
+you've looked at, and the notes you left on specific lines.
+
+Claude Code can leave its own review notes on the code it wrote, right on the
+lines they're about, and `--explain` adds a one-line AI summary above each
+file.
 
 ![prview reviewing a small diff: a file list on the left with viewed checkmarks, a split diff on the right with GitHub-accurate syntax colours, a one-line summary of the file, and review notes above the lines they're about](docs/screenshot.jpg)
 
