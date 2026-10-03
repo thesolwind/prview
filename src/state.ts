@@ -2,6 +2,13 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
+/** The text of a note's line and its neighbours, as they were when it was written. */
+export interface LineSnapshot {
+  text: string;
+  before: string | null;
+  after: string | null;
+}
+
 export interface Note {
   id: string;
   path: string;
@@ -9,6 +16,12 @@ export interface Note {
   line: number;
   body: string;
   createdAt: string;
+  /**
+   * What the line said, so the note can follow it when later edits shift the
+   * numbering (see `anchor.ts`). Absent on notes from before this existed and
+   * on notes written against a line the diff did not show.
+   */
+  snapshot?: LineSnapshot;
   /**
    * Who wrote it. Absent means you did, at the keyboard; a value means it came
    * in through `--annotate`. Only used to keep the two apart — in the pane, in
@@ -219,13 +232,20 @@ export function resetState(state: ReviewState, scope: ResetScope): { state: Revi
   return { state: next, removed };
 }
 
-export const newNote = (path: string, side: 'old' | 'new', line: number, body: string): Note => ({
+export const newNote = (
+  path: string,
+  side: 'old' | 'new',
+  line: number,
+  body: string,
+  snapshot?: LineSnapshot,
+): Note => ({
   id: randomUUID(),
   path,
   side,
   line,
   body,
   createdAt: new Date().toISOString(),
+  ...(snapshot ? { snapshot } : {}),
 });
 
 /** Markdown summary printed on exit, ready to paste into a PR review. */

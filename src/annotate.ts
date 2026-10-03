@@ -10,6 +10,7 @@
  * annotations land on exactly the review the reader will open, and go stale
  * the same way everything else does when the code moves underneath them.
  */
+import { snapshotOf } from './anchor';
 import type { FileDiff } from './parse';
 import { newNote, type Note, type ReviewState, type Summary } from './state';
 
@@ -169,7 +170,8 @@ export function mergeAnnotations(
       // text would be worse than showing it in the wrong place.
       warnings.push(`${entry.path}:${entry.line} is not a changed line on the ${entry.side ?? 'new'} side`);
     }
-    kept.push({ ...newNote(entry.path, entry.side ?? 'new', entry.line, entry.body), author });
+    const side = entry.side ?? 'new';
+    kept.push({ ...newNote(entry.path, side, entry.line, entry.body, snapshotOf(file, side, entry.line)), author });
     noteCount++;
   }
 

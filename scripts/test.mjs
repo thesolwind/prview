@@ -2,7 +2,7 @@ import esbuild from 'esbuild';
 import { spawn } from 'node:child_process';
 
 await esbuild.build({
-  entryPoints: ['test/parse.test.ts', 'test/view.test.ts', 'test/base.test.ts', 'test/explain.test.ts', 'test/annotate.test.ts'],
+  entryPoints: ['test/parse.test.ts', 'test/view.test.ts', 'test/base.test.ts', 'test/explain.test.ts', 'test/annotate.test.ts', 'test/anchor.test.ts'],
   outdir: 'dist/test',
   bundle: true,
   platform: 'node',
@@ -23,6 +23,7 @@ const child = spawn(
     'dist/test/base.test.js',
     'dist/test/explain.test.js',
     'dist/test/annotate.test.js',
+    'dist/test/anchor.test.js',
     'dist/test/theme.test.js',
   ],
   { stdio: 'inherit' },

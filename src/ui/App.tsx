@@ -12,6 +12,7 @@ import { Working } from './Working';
 import type { Theme } from '../theme';
 import type { FileDiff } from '../parse';
 import { Highlighter, langFor } from '../highlight';
+import { reanchorNotes, snapshotOf } from '../anchor';
 import { newNote, notesToMarkdown, type Note, type ReviewState, type Store, type Summary } from '../state';
 import { readSide, type Range, type Repo } from '../git';
 import {
@@ -116,7 +117,7 @@ export function App(props: Props): React.ReactElement {
     return found >= 0 ? found : 0;
   });
   const [viewedMap, setViewedMap] = useState<Record<string, string>>(props.initial.viewed);
-  const [notes, setNotes] = useState<Note[]>(props.initial.notes);
+  const [notes, setNotes] = useState<Note[]>(() => reanchorNotes(props.initial.notes, props.files));
   const [summaries, setSummaries] = useState<Record<string, Summary>>(props.initial.summaries);
   const [positions, setPositions] = useState<Record<string, Scroll>>({});
   const [layout, setLayout] = useState<Layout>(preferredLayout);
@@ -422,7 +423,8 @@ export function App(props: Props): React.ReactElement {
   const addNote = useCallback(
     (body: string) => {
       if (!file || !currentAnchor || !body.trim()) return;
-      setNotes((prev) => [...prev, newNote(file.path, currentAnchor.side, currentAnchor.line, body.trim())]);
+      const { side, line } = currentAnchor;
+      setNotes((prev) => [...prev, newNote(file.path, side, line, body.trim(), snapshotOf(file, side, line))]);
       flash('note saved');
     },
     [file, currentAnchor, flash],
@@ -454,6 +456,7 @@ export function App(props: Props): React.ReactElement {
       try {
         const fresh = await reload();
         setFiles(fresh);
+        setNotes((prev) => reanchorNotes(prev, fresh));
         setTokenCache({});
         flash(`reloaded — ${fresh.length} file${fresh.length === 1 ? '' : 's'}`);
       } catch (err) {

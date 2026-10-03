@@ -34,6 +34,7 @@ import {
 import { dark, light } from './theme';
 import { DEFAULT_EXPLAIN_MODEL, DEFAULT_MAX_FILES } from './explain';
 import { mergeAnnotations, parsePayload, PayloadError } from './annotate';
+import { reanchorNotes } from './anchor';
 import type { Layout } from './view';
 
 type SkillTarget = 'global' | 'local';
@@ -388,7 +389,11 @@ async function main(): Promise<void> {
   const state = await store.load();
 
   if (opts.notesOnly) {
-    const md = notesToMarkdown(state.notes, range.label, state.summaries);
+    // Best effort: the stored line numbers may predate later edits, and the
+    // export is useless without the right ones — but notes still print if the
+    // diff cannot be read.
+    const current = await loadFiles(range, repo, opts.tabWidth).catch(() => [] as FileDiff[]);
+    const md = notesToMarkdown(reanchorNotes(state.notes, current), range.label, state.summaries);
     process.stdout.write(md ? `${md}\n` : `No notes saved for ${range.label}.\n`);
     return;
   }
@@ -459,7 +464,10 @@ async function main(): Promise<void> {
       );
       process.exit(2);
     }
-    const { state: next, report } = mergeAnnotations(state, payload, files);
+    // Re-anchor first: with `replace: false`, or for notes on files this
+    // payload does not touch, what is already stored is written straight back.
+    const anchored = { ...state, notes: reanchorNotes(state.notes, files) };
+    const { state: next, report } = mergeAnnotations(anchored, payload, files);
     await store.save(next);
     try {
       await store.flush();
