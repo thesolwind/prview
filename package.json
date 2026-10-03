@@ -26,7 +26,7 @@
   },
   "type": "module",
   "bin": {
-    "prview": "./dist/cli.js"
+    "prview": "dist/cli.js"
   },
   "files": [
     "dist/cli.js",
