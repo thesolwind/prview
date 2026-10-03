@@ -2,11 +2,36 @@
   "name": "prview",
   "version": "0.1.0",
   "description": "GitHub-style diff reviewer for the terminal, with viewed-state and line notes",
+  "keywords": [
+    "diff",
+    "git",
+    "code-review",
+    "review",
+    "pull-request",
+    "tui",
+    "terminal",
+    "cli",
+    "ink",
+    "claude-code"
+  ],
   "license": "MIT",
+  "author": "thesolwind",
+  "homepage": "https://github.com/thesolwind/prview#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thesolwind/prview.git"
+  },
+  "bugs": {
+    "url": "https://github.com/thesolwind/prview/issues"
+  },
   "type": "module",
   "bin": {
     "prview": "./dist/cli.js"
   },
+  "files": [
+    "dist/cli.js",
+    ".claude/skills/"
+  ],
   "engines": {
     "node": ">=20"
   },
@@ -17,7 +42,8 @@
     "start": "npm run build && node dist/cli.js",
     "test": "node scripts/test.mjs",
     "clean": "git clean -fdX",
-    "preview": "node scripts/build.mjs --preview && node dist/preview.js"
+    "preview": "node scripts/build.mjs --preview && node dist/preview.js",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build"
   },
   "dependencies": {
     "ink": "^5.1.0",

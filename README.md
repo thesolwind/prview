@@ -21,10 +21,10 @@ lines.
 ## Install
 
 ```sh
-npm install
-npm run build
-npm link          # puts `prview` on your PATH
+npm install -g prview
 ```
+
+Or try it without installing: `npx prview`.
 
 Node 20+. Nothing else to install.
 
@@ -97,6 +97,9 @@ changes. `prview <range> --reset summaries|viewed|notes|all` clears one kind.
 ## Development
 
 ```sh
+npm install
+npm run build
+npm link                              # puts your checkout's `prview` on your PATH
 npm test                              # unit tests for the parser, pairing, runs
 npm run typecheck
 npm run dev                           # esbuild watch
