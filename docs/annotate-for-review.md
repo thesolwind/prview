@@ -28,7 +28,7 @@ Both are safe to re-run after an update — the destination is replaced
 wholesale, so a file the skill has since dropped or renamed doesn't linger.
 `local` needs to be run from inside the repo you want it committed to.
 
-It needs `prview` on your `PATH` (`npm install -g prview`)
+It needs `prview` on your `PATH` (`npm install -g @thesolwind/prview`)
 and nothing else — it shells out to `prview --annotate` rather than touching
 `reviews.json` itself, so it cannot get the range key or patch hashes wrong.
 

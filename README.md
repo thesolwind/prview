@@ -21,10 +21,10 @@ lines.
 ## Install
 
 ```sh
-npm install -g prview
+npm install -g @thesolwind/prview
 ```
 
-Or try it without installing: `npx prview`.
+Or try it without installing: `npx @thesolwind/prview`.
 
 Node 20+. Nothing else to install.
 

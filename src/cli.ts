@@ -61,7 +61,7 @@ interface Options {
 /**
  * Walk up from `cli.ts`'s own location to find the package root (the nearest
  * ancestor with a `package.json`) — this repo when running from source, or
- * `<prefix>/lib/node_modules/prview` once installed. Deliberately not a fixed
+ * `<prefix>/lib/node_modules/@thesolwind/prview` once installed. Deliberately not a fixed
  * `dirname(dirname(...))` count off `dist/cli.js`: that would silently break
  * `--install-skill` if the build's output ever nested a level deeper, with
  * nothing to catch it since this is the only thing that reads it.
