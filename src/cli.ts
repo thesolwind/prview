@@ -102,12 +102,14 @@ Options
   -U, --context <n>       lines of context (default 3); -U0 also works
   --tab-width <n>         columns per tab (default 4)
   --light                 light theme (default is dark)
-  --explain               as you open each file, summarise it by piping its
-                          diff to the \`claude\` CLI. OFF by default: it sends
-                          your code to an API, which is not something to do
-                          without being asked. Set PRVIEW_EXPLAIN=1 to have it
-                          on by default. Cached per file version, and only
-                          files you actually open are ever sent.
+  --explain               put a one-line summary above each file, by piping
+                          the diffs to the \`claude\` CLI in one batch at
+                          startup. OFF by default: it sends your code to an
+                          API, which is not something to do without being
+                          asked. Set PRVIEW_EXPLAIN=1 to have it on by
+                          default. Every file in the review is sent except
+                          generated ones (lockfiles, dist/, binaries); cached
+                          per file version, so reopening sends nothing.
   --no-explain            turn it off, overriding PRVIEW_EXPLAIN
   --explain-model <id>    model for the summaries (default ${DEFAULT_EXPLAIN_MODEL})
   --explain-max <n>       most files one session will explain; a runaway
