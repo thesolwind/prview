@@ -73,7 +73,7 @@ context/layout options, and everything else.
 | `s` | split ⇄ unified |
 | `o` | quit and open `$EDITOR` at this line |
 | `w` | write notes to `prview-notes.md` |
-| `r` | re-read the diff from git |
+| `r` | re-read the diff from git (or run with `--watch` to have it refresh on its own) |
 | `esc` | cancel a running explain |
 | `?` `q` | help / quit |
 

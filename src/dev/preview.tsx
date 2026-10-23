@@ -74,6 +74,7 @@ async function main() {
   let dumpFrames = false;
   let explainMax = DEFAULT_MAX_FILES;
   let settle = 300;
+  let watchMs = 0;
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
@@ -84,6 +85,10 @@ async function main() {
     else if (arg === '--light') useLight = true;
     else if (arg === '--dump-frames') dumpFrames = true;
     else if (arg === '--explain-max') explainMax = Number(argv[++i]);
+    // Off unless asked, so a frame never depends on edits racing the capture.
+    // Pair with --settle to give an outside edit time to land.
+    else if (arg === '--watch') watchMs = Number(argv[++i]);
+    else if (arg === '--settle') settle = Number(argv[++i]);
     else if (arg === '--explain') {
       explain = true;
       // A round trip to the model takes seconds; without waiting, the frame is
@@ -121,6 +126,7 @@ async function main() {
       reload={async () => parseDiff(await rawDiff(range, repo), 4)}
       onOpenRequest={() => {}}
       preferredLayout={layout}
+      watchMs={watchMs}
       initialMessage={null}
       explain={
         explain

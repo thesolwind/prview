@@ -39,6 +39,14 @@ import type { Layout } from './view';
 
 type SkillTarget = 'global' | 'local';
 
+/**
+ * Interval for a bare `--watch`: often enough that an edit made in another
+ * window is there by the time you look back; `git diff` on a working tree is
+ * cheap enough not to notice. Off unless asked, so a review you are reading
+ * does not change under you.
+ */
+const DEFAULT_WATCH_SECONDS = 2;
+
 interface Options {
   spec?: string;
   staged: boolean;
@@ -47,6 +55,8 @@ interface Options {
   context: number;
   tabWidth: number;
   layout: Layout;
+  /** Seconds between re-reads of the diff while the app is open; 0 is off. */
+  watch: number;
   light: boolean;
   explain: boolean | null;
   annotate: boolean;
@@ -102,6 +112,11 @@ Options
   -U, --context <n>       lines of context (default 3); -U0 also works
   --tab-width <n>         columns per tab (default 4)
   --light                 light theme (default is dark)
+  --watch [seconds]       re-read the diff this often while open, so edits
+                          made elsewhere show up without restarting
+                          (every ${DEFAULT_WATCH_SECONDS}s if no interval is given). Off by
+                          default: the diff only changes when you press r
+  --no-watch              turn it off, overriding a --watch in an alias
   --explain               put a one-line summary above each file, by piping
                           the diffs to the \`claude\` CLI in one batch at
                           startup. OFF by default: it sends your code to an
@@ -144,6 +159,7 @@ function parseArgs(argv: string[]): Options {
     context: 3,
     tabWidth: 4,
     layout: 'split',
+    watch: 0,
     light: false,
     explain: null,
     annotate: false,
@@ -237,6 +253,21 @@ function parseArgs(argv: string[]): Options {
       case '--tab-width':
         opts.tabWidth = Number.parseInt(argv[++i] ?? '4', 10);
         break;
+      case '--watch': {
+        // The interval is optional, so only a number is taken as one —
+        // `prview --watch main` still reviews main.
+        const next = argv[i + 1];
+        if (next !== undefined && /^\d+(\.\d+)?$/.test(next)) {
+          opts.watch = Number.parseFloat(next);
+          i++;
+        } else {
+          opts.watch = DEFAULT_WATCH_SECONDS;
+        }
+        break;
+      }
+      case '--no-watch':
+        opts.watch = 0;
+        break;
       default:
         if (arg.startsWith('-U')) opts.context = Number.parseInt(arg.slice(2), 10);
         else if (arg.startsWith('-')) throw new Error(`unknown option: ${arg}`);
@@ -253,6 +284,9 @@ function parseArgs(argv: string[]): Options {
   if (!Number.isFinite(opts.explainMaxFiles) || opts.explainMaxFiles < 1) opts.explainMaxFiles = DEFAULT_MAX_FILES;
   if (!Number.isFinite(opts.context) || opts.context < 0) opts.context = 3;
   if (!Number.isFinite(opts.tabWidth) || opts.tabWidth < 1) opts.tabWidth = 4;
+  if (!Number.isFinite(opts.watch) || opts.watch < 0) throw new Error('--watch takes a number of seconds');
+  // Below half a second this is a busy loop of `git diff`, not a live view.
+  if (opts.watch > 0) opts.watch = Math.max(opts.watch, 0.5);
   return opts;
 }
 
@@ -554,6 +588,7 @@ async function main(): Promise<void> {
         openRequest = req;
       },
       preferredLayout: opts.layout,
+      watchMs: opts.watch * 1000,
       explain,
       initialMessage: hints.join('  ·  ') || null,
     }),

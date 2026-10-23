@@ -21,6 +21,8 @@
 | `-U <n>`, `-U<n>`, `--context <n>` | lines of context, default 3 |
 | `--tab-width <n>` | columns per tab, default 4 |
 | `--light` | GitHub's light palette instead of dark |
+| `--watch [seconds]` | re-read the diff this often while open, so edits made elsewhere appear without a restart; every 2s if no interval is given. Off by default |
+| `--no-watch` | turn it off, overriding a `--watch` in an alias |
 
 **Generated explanations** — see [how `--explain` works](explain.md)
 
@@ -30,6 +32,8 @@
 | `--no-explain` | keep it off, overriding `PRVIEW_EXPLAIN=1` |
 | `--explain-model <id>` | model for the summaries, default `claude-haiku-4-5-20251001` |
 | `--explain-max <n>` | most files one session will explain, default 200 |
+
+Files edited while prview is open are not re-sent by `--watch`; their summaries go stale until you press `r`, which re-reads the diff and explains whatever changed.
 
 **Reading and writing review state without the TUI**
 

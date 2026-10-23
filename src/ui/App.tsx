@@ -68,6 +68,8 @@ interface Props {
   reload: () => Promise<FileDiff[]>;
   onOpenRequest: (req: OpenRequest) => void;
   preferredLayout: Layout;
+  /** How often to re-read the diff in the background; 0 means only on `r`. */
+  watchMs: number;
   /** Set only when reviewing a branch that is not yours; null disables it. */
   explain: Explainer | null;
   /** Shown sticky on open: things true about the repo that this review hides. */
@@ -105,7 +107,7 @@ function useTerminalSize(): { columns: number; rows: number } {
 }
 
 export function App(props: Props): React.ReactElement {
-  const { repo, range, branch, store, theme, highlighter, reload, onOpenRequest, preferredLayout, explain } =
+  const { repo, range, branch, store, theme, highlighter, reload, onOpenRequest, preferredLayout, watchMs, explain } =
     props;
   const { exit } = useApp();
   const { columns, rows: termRows } = useTerminalSize();
@@ -134,9 +136,15 @@ export function App(props: Props): React.ReactElement {
     startedAt: number;
   } | null>(null);
   const [tick, setTick] = useState(0);
+  // Bumped by startup and by `r`, never by the watch timer: see the explain effect.
+  const [explainGen, setExplainGen] = useState(0);
   const explainAbortRef = useRef<AbortController | null>(null);
 
   const file = files[fileIndex];
+  const filesRef = useRef(files);
+  filesRef.current = files;
+  const fileIndexRef = useRef(fileIndex);
+  fileIndexRef.current = fileIndex;
 
   const effectiveLayout: Layout = columns < MIN_SPLIT_COLS ? 'unified' : layout;
 
@@ -227,7 +235,13 @@ export function App(props: Props): React.ReactElement {
   // trip instead of N, and nothing has to choose which files a cap is spent on.
   // Results are applied per chunk, so a branch too big for one request fills in
   // progressively instead of arriving all at the end.
+  //
+  // Keyed on `explainGen`, not `files`: with --watch the files change every
+  // time you save, and each save would otherwise be another API call — and,
+  // through the cleanup, abort the batch already in flight. Summaries for
+  // files edited since go stale (their hash moves on) until you press `r`.
   useEffect(() => {
+    const files = filesRef.current;
     if (!explain || !files.length || explainOffRef.current) return;
     // Apply the same skip rule the runner will: counting a lockfile here makes
     // the indicator promise work that is never going to happen, and re-arms
@@ -291,7 +305,7 @@ export function App(props: Props): React.ReactElement {
     return () => {
       abort.abort();
     };
-  }, [explain, files, flash, raise]);
+  }, [explain, explainGen, flash, raise]);
 
   // Syntax highlighting for the visible file only, both sides, lazily.
   useEffect(() => {
@@ -451,19 +465,75 @@ export function App(props: Props): React.ReactElement {
     flash('note deleted');
   }, [file, viewRows, cursor, currentAnchor, notes, flash]);
 
+  /**
+   * Swap in a freshly read diff, staying on the file you were looking at
+   * rather than on its old index — a file added or dropped above it would
+   * otherwise move you to a different file mid-read.
+   */
+  const applyFresh = useCallback((fresh: FileDiff[]) => {
+    const here = filesRef.current[fileIndexRef.current]?.path;
+    const at = here ? fresh.findIndex((f) => f.path === here) : -1;
+    setFiles(fresh);
+    setFileIndex((prev) => (at >= 0 ? at : clamp(prev, 0, Math.max(0, fresh.length - 1))));
+    setNotes((prev) => reanchorNotes(prev, fresh));
+  }, []);
+
+  const reloadingRef = useRef(false);
   const doReload = useCallback(() => {
     void (async () => {
+      reloadingRef.current = true;
       try {
         const fresh = await reload();
-        setFiles(fresh);
-        setNotes((prev) => reanchorNotes(prev, fresh));
+        applyFresh(fresh);
         setTokenCache({});
+        setExplainGen((g) => g + 1);
         flash(`reloaded — ${fresh.length} file${fresh.length === 1 ? '' : 's'}`);
       } catch (err) {
         flash(`reload failed: ${(err as Error).message}`);
+      } finally {
+        reloadingRef.current = false;
       }
     })();
-  }, [reload, flash]);
+  }, [reload, applyFresh, flash]);
+
+  // The background half of `r`, for watching a change while it is being made.
+  // Only acts when some patch actually changed, so an idle review does not
+  // flash or re-highlight every few seconds; and only in browse mode, so the
+  // line a note is being typed against cannot move under it. A chained
+  // timeout rather than an interval: a slow `git diff` delays the next read
+  // instead of piling up behind it.
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
+  useEffect(() => {
+    if (watchMs <= 0) return;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const signature = (fs: FileDiff[]) => fs.map((f) => `${f.path}@${f.hash}`).join('\n');
+    const poll = async () => {
+      if (modeRef.current === 'browse' && !reloadingRef.current) {
+        try {
+          const fresh = await reload();
+          if (!stopped && signature(fresh) !== signature(filesRef.current)) {
+            applyFresh(fresh);
+            // Highlighting is cached per path@hash, so unchanged files keep
+            // theirs; only drop what no longer exists.
+            const live = new Set(fresh.map((f) => `${f.path}@${f.hash}`));
+            setTokenCache((prev) => Object.fromEntries(Object.entries(prev).filter(([k]) => live.has(k))));
+            flash(`diff changed — ${fresh.length} file${fresh.length === 1 ? '' : 's'}`);
+          }
+        } catch {
+          // Mid-rebase or mid-checkout git can fail for a moment; the next
+          // tick will try again, and `r` still reports errors loudly.
+        }
+      }
+      if (!stopped) timer = setTimeout(() => void poll(), watchMs);
+    };
+    timer = setTimeout(() => void poll(), watchMs);
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+    };
+  }, [watchMs, reload, applyFresh, flash]);
 
   const writeNotes = useCallback(() => {
     void (async () => {
