@@ -1,3 +1,7 @@
 node_modules/
 dist/
 .DS_Store
+
+# Personal Claude Code setup (tankview plugin); the shared skill stays tracked
+.claude/agents/
+.claude/settings.json
