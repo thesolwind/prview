@@ -11,7 +11,10 @@ npm in the next published version.
 
 ## [Unreleased]
 
-## [0.3.0] — 2026-11-03 · beta
+## [0.3.0] — 2026-11-03 · beta · on npm
+
+Published under the `beta` dist-tag: `npm install -g @thesolwind/prview@beta`.
+A plain install still gets 0.1.2 (`latest`).
 
 ### Added
 
