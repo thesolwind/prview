@@ -37,6 +37,15 @@ npm install -g @thesolwind/prview
 
 Or try it without installing: `npx @thesolwind/prview`.
 
+The newest version, with the [diff flow](#generated-explanations) tab and
+`--watch`, is in beta:
+
+```sh
+npm install -g @thesolwind/prview@beta
+```
+
+See the [changelog](CHANGELOG.md) for what each version adds.
+
 Node 20+. Nothing else to install.
 
 ## Use
