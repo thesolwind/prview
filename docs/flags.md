@@ -30,7 +30,8 @@
 |---|---|
 | `--explain` | summarise every file in one batch (off by default — it sends code to an API) |
 | `--no-explain` | keep it off, overriding `PRVIEW_EXPLAIN=1` |
-| `--explain-model <id>` | model for the summaries, default `claude-haiku-4-5-20251001` |
+| `--explain-model <id>` | model for the summaries, default `opus` (`haiku` is faster and cheaper) |
+| `--flow-model <id>` | model for the diff flow (`f`), default `opus` |
 | `--explain-max <n>` | most files one session will explain, default 200 |
 
 Files edited while prview is open are not re-sent by `--watch`; their summaries go stale until you press `r`, which re-reads the diff and explains whatever changed.
@@ -40,8 +41,8 @@ Files edited while prview is open are not re-sent by `--watch`; their summaries 
 | | |
 |---|---|
 | `--notes` | print this range's notes and summaries as Markdown, then exit |
-| `--annotate` | read `{summaries, notes}` as JSON on stdin, store it, then exit |
-| `--reset <what>` | clear `summaries`, `viewed`, `notes` or `all` for this range |
+| `--annotate` | read `{summaries, notes, flow}` as JSON on stdin, store it, then exit |
+| `--reset <what>` | clear `summaries` (and the diff flow), `viewed`, `notes` or `all` for this range |
 | `--prune` | drop ranges whose commit no longer exists |
 | `--install-skill [where]` | install the [annotate-for-review](annotate-for-review.md) skill; `global` (default) or `local` |
 | `-h`, `--help` | usage |

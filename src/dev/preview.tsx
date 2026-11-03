@@ -150,7 +150,8 @@ async function main() {
   }
   await sleep(settle);
 
-  const finalFrame = [...frames].reverse().find((f) => f.includes('viewed')) ?? frames[frames.length - 1];
+  // A full frame of either page; partial redraws carry neither marker.
+  const finalFrame = [...frames].reverse().find((f) => f.includes('viewed') || f.includes('diff flow')) ?? frames[frames.length - 1];
   app.unmount();
   // Every frame, for checking transient states that the last frame cannot show.
   if (dumpFrames) {

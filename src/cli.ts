@@ -33,6 +33,7 @@ import {
 } from './state';
 import { dark, light } from './theme';
 import { DEFAULT_EXPLAIN_MODEL, DEFAULT_MAX_FILES } from './explain';
+import { DEFAULT_FLOW_MODEL } from './flow';
 import { mergeAnnotations, parsePayload, PayloadError } from './annotate';
 import { reanchorNotes } from './anchor';
 import type { Layout } from './view';
@@ -63,6 +64,7 @@ interface Options {
   reset: ResetScope | null;
   prune: boolean;
   explainModel: string;
+  flowModel: string;
   explainMaxFiles: number;
   notesOnly: boolean;
   installSkill: SkillTarget | null;
@@ -125,8 +127,13 @@ Options
                           default. Every file in the review is sent except
                           generated ones (lockfiles, dist/, binaries); cached
                           per file version, so reopening sends nothing.
+                          Also lets \`f\` draw the diff flow: a diagram of the
+                          code path the change touches, one more request,
+                          made the first time you open it
   --no-explain            turn it off, overriding PRVIEW_EXPLAIN
   --explain-model <id>    model for the summaries (default ${DEFAULT_EXPLAIN_MODEL})
+  --flow-model <id>       model for the diff flow (default ${DEFAULT_FLOW_MODEL}):
+                          tracing calls across files needs a larger model
   --explain-max <n>       most files one session will explain; a runaway
                           guard, not a budget (default ${DEFAULT_MAX_FILES})
   --notes                 print saved notes for this range and exit
@@ -136,7 +143,7 @@ Options
                           not recoverable, so the word is required
   --prune                 drop review state for ranges whose commit no longer
                           exists — the leftovers of amends and rebases
-  --annotate              read {summaries, notes} as JSON on stdin, write it
+  --annotate              read {summaries, notes, flow} as JSON on stdin, write it
                           into this range's review state, and exit. Lets a
                           tool leave review material where the reader will
                           find it; see \`--notes\` to read it back
@@ -166,6 +173,7 @@ function parseArgs(argv: string[]): Options {
     reset: null,
     prune: false,
     explainModel: DEFAULT_EXPLAIN_MODEL,
+    flowModel: DEFAULT_FLOW_MODEL,
     explainMaxFiles: DEFAULT_MAX_FILES,
     notesOnly: false,
     installSkill: null,
@@ -235,6 +243,9 @@ function parseArgs(argv: string[]): Options {
         break;
       case '--explain-model':
         opts.explainModel = argv[++i] ?? DEFAULT_EXPLAIN_MODEL;
+        break;
+      case '--flow-model':
+        opts.flowModel = argv[++i] ?? DEFAULT_FLOW_MODEL;
         break;
       case '--explain-max':
         opts.explainMaxFiles = Number.parseInt(argv[++i] ?? '', 10);
@@ -429,7 +440,7 @@ async function main(): Promise<void> {
     // export is useless without the right ones — but notes still print if the
     // diff cannot be read.
     const current = await loadFiles(range, repo, opts.tabWidth).catch(() => [] as FileDiff[]);
-    const md = notesToMarkdown(reanchorNotes(state.notes, current), range.label, state.summaries);
+    const md = notesToMarkdown(reanchorNotes(state.notes, current), range.label, state.summaries, state.flow);
     process.stdout.write(md ? `${md}\n` : `No notes saved for ${range.label}.\n`);
     return;
   }
@@ -515,6 +526,7 @@ async function main(): Promise<void> {
     process.stdout.write(
       `wrote ${report.summaries} summar${report.summaries === 1 ? 'y' : 'ies'} and ` +
         `${report.notes} note${report.notes === 1 ? '' : 's'}` +
+        `${report.flow ? ' and the flow diagram' : ''}` +
         `${report.replaced ? ` (replaced ${report.replaced})` : ''} to ${range.label}\n`,
     );
     return;
@@ -565,6 +577,7 @@ async function main(): Promise<void> {
   const explain = wantExplain
     ? {
         model: opts.explainModel,
+        flowModel: opts.flowModel,
         cwd: repo.root,
         maxFiles: opts.explainMaxFiles,
         logPath: join(repo.gitDir, 'prview', 'explain.log'),

@@ -80,12 +80,20 @@ Pipeline, roughly in data-flow order:
    files, capping size) into one shelled-out call to the `claude` CLI per
    batch, parses `path<TAB>summary` lines back out, caches per patch hash.
    Never runs unprompted — off unless `--explain` or `PRVIEW_EXPLAIN=1`.
-9. **`src/annotate.ts`** — the other half of `--annotate`: validates and
-   merges a `{summaries, notes}` JSON payload from stdin into a `ReviewState`,
+9. **`src/flow.ts`** — the diff flow tab (`f`): asks the `claude` CLI for a
+   Mermaid flowchart of the code path the change touches (same opt-in as
+   `--explain`, on demand), parses a strict subset of Mermaid, and lays it
+   out as box-drawing art (layered, lane-routed edges). Uses its own model
+   (`--flow-model`, Opus by default), and `checkKinds` holds the model's
+   added/changed marks to the old side of each file. Stored as Mermaid
+   source in `ReviewState.flow`, keyed by a hash of every patch so edits
+   mark it stale; `src/ui/FlowPane.tsx` renders it.
+10. **`src/annotate.ts`** — the other half of `--annotate`: validates and
+   merges a `{summaries, notes, flow}` JSON payload from stdin into a `ReviewState`,
    used by the `annotate-for-review` skill (`.claude/skills/annotate-for-review/`) so an
    agent session can leave review notes for a human without touching
    `reviews.json` directly.
-10. **`src/cli.ts`** — argument parsing and top-level command dispatch
+11. **`src/cli.ts`** — argument parsing and top-level command dispatch
     (`--notes`, `--reset`, `--prune`, `--annotate`, or launch the Ink app).
 
 `src/dev/preview.tsx` is the headless-render entry point used by

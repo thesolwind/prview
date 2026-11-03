@@ -13,6 +13,7 @@
 import { snapshotOf } from './anchor';
 import type { FileDiff } from './parse';
 import { newNote, type Note, type ReviewState, type Summary } from './state';
+import { flowSignature, FlowParseError, linkFiles, parseMermaid } from './flow';
 
 export const DEFAULT_AUTHOR = 'claude';
 
@@ -30,6 +31,12 @@ export interface AnnotatePayload {
   /** path -> one line on what changed in that file and why. */
   summaries?: Record<string, string>;
   notes?: Annotation[];
+  /**
+   * The flow this change touches, as Mermaid in the subset `flow.ts` reads.
+   * The author drew it from what it actually changed, which is a better
+   * picture than one inferred from the diff — and costs no extra request.
+   */
+  flow?: string;
   /**
    * Drop this author's existing notes on the paths being written before
    * adding the new ones. On by default: re-running after another edit should
@@ -97,8 +104,18 @@ export function parsePayload(raw: string): AnnotatePayload {
     });
   }
 
-  if (!payload.summaries && !payload.notes) {
-    throw new PayloadError('nothing to write: give "summaries", "notes", or both');
+  if (input.flow !== undefined) {
+    const flow = asString(input.flow, 'flow');
+    try {
+      parseMermaid(flow);
+    } catch (err) {
+      throw new PayloadError(`flow is not a usable Mermaid flowchart — ${(err as FlowParseError).message}`);
+    }
+    payload.flow = flow;
+  }
+
+  if (!payload.summaries && !payload.notes && !payload.flow) {
+    throw new PayloadError('nothing to write: give "summaries", "notes", "flow", or any of them');
   }
   return payload;
 }
@@ -107,6 +124,7 @@ export interface AnnotateReport {
   summaries: number;
   notes: number;
   replaced: number;
+  flow: boolean;
   /** Things worth telling the caller about, but not worth refusing over. */
   warnings: string[];
 }
@@ -175,8 +193,16 @@ export function mergeAnnotations(
     noteCount++;
   }
 
+  let flow = state.flow;
+  if (payload.flow) {
+    for (const path of new Set(linkFiles(parseMermaid(payload.flow), files).unknown)) {
+      warnings.push(`flow: ${path} is not in this diff, its node will not link to a file`);
+    }
+    flow = { hash: flowSignature(files), mermaid: payload.flow, model: author, createdAt: new Date().toISOString() };
+  }
+
   return {
-    state: { ...state, notes: kept, summaries },
-    report: { summaries: summaryCount, notes: noteCount, replaced, warnings },
+    state: { ...state, notes: kept, summaries, flow },
+    report: { summaries: summaryCount, notes: noteCount, replaced, flow: !!payload.flow, warnings },
   };
 }

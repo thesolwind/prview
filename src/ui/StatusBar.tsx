@@ -14,10 +14,12 @@ interface Props {
   deletions: number;
   layout: 'split' | 'unified';
   message: string | null;
+  /** Key hints for the page showing; defaults to the diff's. */
+  hint?: string;
 }
 
 export function StatusBar(props: Props): React.ReactElement {
-  const { theme, width, label, branch, files, additions, deletions, layout, message } = props;
+  const { theme, width, label, branch, files, additions, deletions, layout, message, hint } = props;
   return (
     <Box width={width} flexDirection="column">
       <Box width={width}>
@@ -38,7 +40,7 @@ export function StatusBar(props: Props): React.ReactElement {
                 { text: `  +${additions}`, color: theme.addSign },
                 { text: `  −${deletions}`, color: theme.delSign },
                 { text: `  [${layout}]  `, color: theme.dim },
-                { text: 'j/k move  n/p file  space viewed  c note  ? help  q quit', color: theme.dim },
+                { text: hint ?? 'j/k move  n/p file  space viewed  c note  f flow  ? help  q quit', color: theme.dim },
               ]
         }
       />

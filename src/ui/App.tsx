@@ -9,8 +9,9 @@ import { StatusBar } from './StatusBar';
 import { NoteInput } from './NoteInput';
 import { Help } from './Help';
 import { Working } from './Working';
+import { FlowPane, FLOW_CHROME_HEIGHT, type FlowStatus } from './FlowPane';
 import type { Theme } from '../theme';
-import type { FileDiff } from '../parse';
+import { wholeFile, type FileDiff } from '../parse';
 import { Highlighter, langFor } from '../highlight';
 import { reanchorNotes, snapshotOf } from '../anchor';
 import { newNote, notesToMarkdown, type Note, type ReviewState, type Store, type Summary } from '../state';
@@ -26,6 +27,21 @@ import {
   type Layout,
 } from '../view';
 import { explainAll, ExplainAborted, ExplainUnavailable, skipReason, type Explainer } from '../explain';
+import {
+  checkKinds,
+  DEFAULT_FLOW_MODEL,
+  flowSignature,
+  generateFlow,
+  kindCheckPaths,
+  layoutFlow,
+  linkFiles,
+  parseMermaid,
+  type Flow,
+  type FlowBox,
+  type FlowLayout,
+  stepLine,
+  type StoredFlow,
+} from '../flow';
 
 type KeyPress = Key;
 
@@ -90,6 +106,20 @@ interface Scroll {
 
 const clamp = (n: number, lo: number, hi: number) => Math.min(Math.max(n, lo), hi);
 
+/**
+ * The smallest pan that brings a box into view, so moving the selection
+ * scrolls only when it has to and a pan you chose survives moves within it.
+ * A box larger than the view keeps its top-left corner visible.
+ */
+function fitPan(box: FlowBox, pan: { x: number; y: number }, w: number, h: number): { x: number; y: number } {
+  const axis = (start: number, size: number, at: number, view: number) => {
+    if (start < at) return start;
+    if (start + size > at + view) return Math.min(start, start + size - view);
+    return at;
+  };
+  return { x: Math.max(0, axis(box.x - 2, box.w + 4, pan.x, w)), y: Math.max(0, axis(box.y - 1, box.h + 2, pan.y, h)) };
+}
+
 function useTerminalSize(): { columns: number; rows: number } {
   const { stdout } = useStdout();
   const [size, setSize] = useState({
@@ -124,6 +154,15 @@ export function App(props: Props): React.ReactElement {
   const [positions, setPositions] = useState<Record<string, Scroll>>({});
   const [layout, setLayout] = useState<Layout>(preferredLayout);
   const [mode, setMode] = useState<'browse' | 'note' | 'help' | 'confirm'>('browse');
+  // Which page is showing; separate from `mode` so help opens over either.
+  const [tab, setTab] = useState<'diff' | 'flow'>('diff');
+  const [storedFlow, setStoredFlow] = useState<StoredFlow | undefined>(props.initial.flow);
+  const [flowStatus, setFlowStatus] = useState<FlowStatus>({ kind: 'ready' });
+  const [flowSel, setFlowSel] = useState(0);
+  const [flowPan, setFlowPan] = useState({ x: 0, y: 0 });
+  // A tip can cover a neighbouring step, so it can be put away.
+  const [flowTips, setFlowTips] = useState(true);
+  const flowAbortRef = useRef<AbortController | null>(null);
   const [pending, setPending] = useState<BulkAction | null>(null);
   const [buffer, setBuffer] = useState('');
   const [message, setMessage] = useState<{ text: string; sticky?: boolean } | null>(
@@ -140,13 +179,21 @@ export function App(props: Props): React.ReactElement {
   const [explainGen, setExplainGen] = useState(0);
   const explainAbortRef = useRef<AbortController | null>(null);
 
-  const file = files[fileIndex];
+  /**
+   * A file shown from the flow that the diff does not contain: an unchanged
+   * step drawn for context, or a new file git does not track. Read-only and
+   * outside the file list — viewed marks and notes belong to the review, and
+   * this file is not in it. Cleared by moving to any real file.
+   */
+  const [peek, setPeek] = useState<FileDiff | null>(null);
+  const file = peek ?? files[fileIndex];
   const filesRef = useRef(files);
   filesRef.current = files;
   const fileIndexRef = useRef(fileIndex);
   fileIndexRef.current = fileIndex;
 
-  const effectiveLayout: Layout = columns < MIN_SPLIT_COLS ? 'unified' : layout;
+  // A peeked file has one side worth showing, so it never splits.
+  const effectiveLayout: Layout = columns < MIN_SPLIT_COLS || peek ? 'unified' : layout;
 
   const promptHeight = mode === 'note' || mode === 'confirm' ? 2 : 0;
   // A theme that owns the screen gets a painted right-hand gutter. It costs a
@@ -223,10 +270,122 @@ export function App(props: Props): React.ReactElement {
       viewed: viewedMap,
       notes,
       summaries,
-      last: file ? { path: file.path } : undefined,
+      flow: storedFlow,
+      // The list position, not a peek: a peeked file is not in the list to resume at.
+      last: files[fileIndex] ? { path: files[fileIndex]!.path } : undefined,
       updatedAt: new Date().toISOString(),
     });
-  }, [store, viewedMap, notes, summaries, file]);
+  }, [store, viewedMap, notes, summaries, storedFlow, files, fileIndex]);
+
+  // --- diff flow -----------------------------------------------------------
+
+  // Parsed and laid out from the stored source every time, never stored drawn:
+  // the file links must follow the current diff, and so must any layout fix.
+  const linkedFlow = useMemo((): Flow | null => {
+    if (!storedFlow) return null;
+    try {
+      return linkFiles(parseMermaid(storedFlow.mermaid), files).flow;
+    } catch {
+      return null;
+    }
+  }, [storedFlow, files]);
+
+  // The old side of each modified file with a step the diagram calls new, so
+  // checkKinds can tell "added" from "changed" by what git has rather than
+  // by what the model guessed. Read once per drawing; until it arrives the
+  // diagram shows as claimed.
+  const [oldTexts, setOldTexts] = useState<ReadonlyMap<string, string>>(new Map());
+  useEffect(() => {
+    setOldTexts(new Map());
+    const oldRev = range.oldRev;
+    if (!linkedFlow || !oldRev) return;
+    const paths = kindCheckPaths(linkedFlow, files);
+    if (!paths.length) return;
+    let live = true;
+    void (async () => {
+      const read = new Map<string, string>();
+      for (const path of paths) {
+        const file = files.find((f) => f.path === path);
+        const text = await readSide(repo, { kind: 'rev', rev: oldRev }, file?.oldPath ?? path);
+        if (text != null) read.set(path, text);
+      }
+      if (live) setOldTexts(read);
+    })();
+    return () => {
+      live = false;
+    };
+  }, [linkedFlow, files, repo, range.oldRev]);
+
+  const flowGraph = useMemo((): { flow: Flow; layout: FlowLayout } | null => {
+    if (!linkedFlow) return null;
+    const flow = checkKinds(linkedFlow, files, oldTexts);
+    return { flow, layout: layoutFlow(flow) };
+  }, [linkedFlow, files, oldTexts]);
+  const flowStale = !!storedFlow && storedFlow.hash !== flowSignature(files);
+  const flowBodyHeight = Math.max(1, contentHeight - FLOW_CHROME_HEIGHT);
+  const flowViewRef = useRef({ w: columns, h: flowBodyHeight });
+  flowViewRef.current = { w: columns, h: flowBodyHeight };
+
+  // A fresh drawing starts on the first changed step: that is what the tab is
+  // for, and the entry point above it is usually one `k` away. Keyed on the
+  // stored source, not the graph: `--watch` re-links the graph on every edit,
+  // and the selection should not jump back each time.
+  useEffect(() => {
+    if (!flowGraph) return;
+    const { flow, layout } = flowGraph;
+    const first = layout.order.find((i) => flow.nodes[i]?.kind !== 'context') ?? layout.order[0] ?? 0;
+    setFlowSel(first);
+    const box = layout.boxes.find((b) => b.node === first);
+    setFlowPan(box ? fitPan(box, { x: 0, y: 0 }, flowViewRef.current.w, flowViewRef.current.h) : { x: 0, y: 0 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storedFlow]);
+
+  /**
+   * One request for the whole review. Never on startup and never from the
+   * watch timer: only when the tab is opened with nothing to show, or on `R`
+   * -- so a review that never looks at the flow never pays for one.
+   */
+  const requestFlow = useCallback(() => {
+    if (!explain) {
+      // With a diagram on screen the 'off' state draws nothing new, so R
+      // would look like it did nothing; say why instead.
+      setFlowStatus({ kind: 'off' });
+      flash('drawing a flow sends the diff to the claude CLI: restart with --explain (or PRVIEW_EXPLAIN=1)');
+      return;
+    }
+    flowAbortRef.current?.abort();
+    const abort = new AbortController();
+    flowAbortRef.current = abort;
+    const current = filesRef.current;
+    setFlowStatus({
+      kind: 'loading',
+      startedAt: Date.now(),
+      model: explain.flowModel ?? DEFAULT_FLOW_MODEL,
+      files: current.filter((f) => !skipReason(f)).length,
+    });
+    generateFlow(current, explain, abort.signal)
+      .then(({ mermaid, model }) => {
+        if (abort.signal.aborted) return;
+        setStoredFlow({
+          hash: flowSignature(current),
+          mermaid,
+          model,
+          createdAt: new Date().toISOString(),
+        });
+        setFlowStatus({ kind: 'ready' });
+      })
+      .catch((err: unknown) => {
+        if (err instanceof ExplainAborted || abort.signal.aborted) return;
+        setFlowStatus({ kind: 'error', message: (err as Error).message });
+      });
+  }, [explain, flash]);
+
+  useEffect(() => () => flowAbortRef.current?.abort(), []);
+
+  const openFlow = useCallback(() => {
+    setTab('flow');
+    if (!storedFlow && flowStatus.kind !== 'loading' && flowStatus.kind !== 'error') requestFlow();
+  }, [storedFlow, flowStatus.kind, requestFlow]);
 
   const explainTriedRef = useRef(new Set<string>());
   const explainOffRef = useRef(false);
@@ -359,11 +518,12 @@ export function App(props: Props): React.ReactElement {
     setPos(file.path, (p) => ({ ...p, hscroll: target }));
   }, [file, cursor, viewRows, diffWidth, effectiveLayout, setPos]);
 
+  const flowLoading = flowStatus.kind === 'loading';
   useEffect(() => {
-    if (!explainProgress) return;
+    if (!explainProgress && !flowLoading) return;
     const timer = setInterval(() => setTick((t) => t + 1), 90);
     return () => clearInterval(timer);
-  }, [explainProgress]);
+  }, [explainProgress, flowLoading]);
 
   const moveCursor = useCallback(
     (delta: number) => {
@@ -401,9 +561,11 @@ export function App(props: Props): React.ReactElement {
   const moveFile = useCallback(
     (delta: number) => {
       if (!files.length) return;
+      // Leaving a peek returns to the file list where it was, not one past it.
+      if (peek) return setPeek(null);
       setFileIndex((prev) => clamp(prev + delta, 0, files.length - 1));
     },
-    [files.length],
+    [files.length, peek],
   );
 
   const nextUnviewed = useCallback(
@@ -537,7 +699,7 @@ export function App(props: Props): React.ReactElement {
 
   const writeNotes = useCallback(() => {
     void (async () => {
-      const md = notesToMarkdown(notes, range.label, summaries);
+      const md = notesToMarkdown(notes, range.label, summaries, storedFlow);
       if (!md) {
         flash('no notes to write');
         return;
@@ -550,7 +712,7 @@ export function App(props: Props): React.ReactElement {
         flash(`write failed: ${(err as Error).message}`);
       }
     })();
-  }, [notes, summaries, range.label, repo.root, flash]);
+  }, [notes, summaries, storedFlow, range.label, repo.root, flash]);
 
   // Keep the cursor on the same source line when the layout changes.
   //
@@ -574,10 +736,111 @@ export function App(props: Props): React.ReactElement {
     });
   }, [effectiveLayout, file, setPos, viewRows]);
 
+  // Where Enter on a flow step should land. Applied in an effect because the
+  // rows of the file being opened do not exist until the next render.
+  const pendingJumpRef = useRef<{ path: string; line: number } | null>(null);
+  useEffect(() => {
+    const jump = pendingJumpRef.current;
+    if (!jump || !file || file.path !== jump.path) return;
+    pendingJumpRef.current = null;
+    const at = remapCursor(viewRows, { side: 'new', line: jump.line }, firstCode);
+    const h = bodyHeightRef.current;
+    setPos(file.path, (prev) => ({
+      ...prev,
+      cursor: at,
+      scroll: clamp(at - Math.floor(h / 3), 0, Math.max(0, viewRows.length - h)),
+    }));
+  }, [file, viewRows, firstCode, setPos]);
+
+  /** Open a flow step's file: from the diff if it is there, else read it whole. */
+  const openStep = useCallback(
+    (path: string, label: string) => {
+      const i = files.findIndex((f) => f.path === path);
+      if (i >= 0) {
+        const target = files[i]!;
+        const line = stepLine(target, label);
+        if (line != null) pendingJumpRef.current = { path, line };
+        setPeek(null);
+        setFileIndex(i);
+        setTab('diff');
+        return;
+      }
+      void (async () => {
+        const text = await readSide(repo, range.newSide, path);
+        if (text == null) return flash(`${path} does not exist on the ${range.newLabel} side`);
+        // In the old side too means it is simply unchanged; otherwise it is
+        // new, and only missing from the diff because git does not track it.
+        const before = await readSide(repo, { kind: 'rev', rev: range.oldRev ?? 'HEAD' }, path);
+        const shown = wholeFile(path, text, before == null ? 'added' : 'context');
+        if (!shown) return flash(`${path} is empty`);
+        const line = stepLine(shown, label);
+        if (line != null) pendingJumpRef.current = { path, line };
+        setPeek(shown);
+        setTab('diff');
+      })();
+    },
+    [files, repo, range, flash],
+  );
+
+  const handleFlowKey = useCallback(
+    (input: string, key: KeyPress) => {
+      if (input === 'q' || (key.ctrl && input === 'c')) return exit();
+      if (input === '?') return setMode('help');
+      if (input === 'f' || key.escape) return setTab('diff');
+      if (input === 'R') return requestFlow();
+      if (input === 't') return setFlowTips((on) => !on);
+      if (input === 'r') return doReload();
+      if (!flowGraph) return;
+      const { flow, layout } = flowGraph;
+      const { w, h } = flowViewRef.current;
+
+      const select = (next: number) => {
+        setFlowSel(next);
+        const box = layout.boxes.find((b) => b.node === next);
+        if (box) setFlowPan((pan) => fitPan(box, pan, w, h));
+      };
+      const count = layout.order.length;
+      const at = Math.max(0, layout.order.indexOf(flowSel));
+      if (input === 'j' || key.downArrow || key.tab) return select(layout.order[(at + 1) % count] ?? flowSel);
+      if (input === 'k' || key.upArrow) return select(layout.order[(at - 1 + count) % count] ?? flowSel);
+      // Next step this change actually touched, skipping the context around it.
+      if (input === 'n' || input === 'p') {
+        const dir = input === 'n' ? 1 : -1;
+        for (let step = 1; step <= count; step++) {
+          const i = layout.order[(((at + dir * step) % count) + count) % count];
+          if (i !== undefined && flow.nodes[i]?.kind !== 'context') return select(i);
+        }
+        return;
+      }
+      const maxX = Math.max(0, layout.width - w);
+      const maxY = Math.max(0, layout.height - h);
+      if (input === 'h' || key.leftArrow) return setFlowPan((p) => ({ ...p, x: clamp(p.x - 8, 0, maxX) }));
+      if (input === 'l' || key.rightArrow) return setFlowPan((p) => ({ ...p, x: clamp(p.x + 8, 0, maxX) }));
+      if (key.ctrl && input === 'd') return setFlowPan((p) => ({ ...p, y: clamp(p.y + Math.floor(h / 2), 0, maxY) }));
+      if (key.ctrl && input === 'u') return setFlowPan((p) => ({ ...p, y: clamp(p.y - Math.floor(h / 2), 0, maxY) }));
+      if (key.return) {
+        const step = flow.nodes[flowSel];
+        const path = step?.file ?? step?.missing;
+        if (!step || !path) return flash('this step is not linked to a file');
+        openStep(path, step.label);
+      }
+    },
+    [exit, requestFlow, doReload, flowGraph, flowSel, flash, openStep],
+  );
+
   const handleKey = useCallback(
     (input: string, key: KeyPress) => {
       if (input === 'q' || (key.ctrl && input === 'c')) return exit();
       if (input === '?') return setMode('help');
+      if (input === 'f') return openFlow();
+      if (peek && key.escape) {
+        setPeek(null);
+        return setTab('flow');
+      }
+      if (peek && (input === ' ' || input === 'a' || input === 'A' || input === 'c' || input === 'd')) {
+        return flash('read-only: this file is not part of the diff');
+      }
+      if (peek && (input === 's')) return flash('a file outside the diff has one side; it stays unified');
 
       if (input === 'j' || key.downArrow) return moveCursor(1);
       if (input === 'k' || key.upArrow) return moveCursor(-1);
@@ -602,7 +865,10 @@ export function App(props: Props): React.ReactElement {
 
       if (input === 'n' || input === 'J') return moveFile(1);
       if (input === 'p' || input === 'K') return moveFile(-1);
-      if (key.tab) return nextUnviewed(key.shift ? -1 : 1);
+      if (key.tab) {
+        setPeek(null);
+        return nextUnviewed(key.shift ? -1 : 1);
+      }
 
       if (input === ' ') return toggleViewed();
       // Both discard which files you had actually read, so both are deliberate.
@@ -627,7 +893,7 @@ export function App(props: Props): React.ReactElement {
     },
     [
       exit, moveCursor, jumpHunk, viewRows.length, file, setPos, moveFile, nextUnviewed,
-      toggleViewed, flash, currentAnchor, deleteNote, doReload, writeNotes, onOpenRequest,
+      toggleViewed, flash, currentAnchor, deleteNote, doReload, writeNotes, onOpenRequest, openFlow, peek,
     ],
   );
 
@@ -684,11 +950,12 @@ export function App(props: Props): React.ReactElement {
 
     // Terminals coalesce fast keystrokes — and key repeat — into a single data
     // event, so a chunk of plain characters is several presses, not one.
+    const handler = tab === 'flow' ? handleFlowKey : handleKey;
     if (input.length > 1 && !key.ctrl && !key.meta && !key.escape) {
-      for (const ch of input) handleKey(ch, key);
+      for (const ch of input) handler(ch, key);
       return;
     }
-    handleKey(input, key);
+    handler(input, key);
   });
 
 
@@ -725,6 +992,63 @@ export function App(props: Props): React.ReactElement {
     { additions: 0, deletions: 0 },
   );
 
+  const statusBar = (
+    <StatusBar
+      theme={theme}
+      width={columns}
+      label={range.label}
+      branch={branch}
+      files={files.length}
+      additions={totals.additions}
+      deletions={totals.deletions}
+      layout={effectiveLayout}
+      message={message?.text ?? null}
+      hint={tab === 'flow' ? 'j/k step  n/p changed step  enter open file  t tips  h/l pan  R redraw  f back  q quit' : undefined}
+    />
+  );
+
+  if (tab === 'flow') {
+    // A stored diagram that no longer parses is an error to show, not an
+    // empty tab that looks like nothing was ever drawn.
+    const status: FlowStatus =
+      storedFlow && !flowGraph && flowStatus.kind === 'ready'
+        ? { kind: 'error', message: 'the stored diagram could not be read' }
+        : flowStatus;
+    // The diagram's own note on the step first. Failing that, the summary of
+    // its file — only while it still describes the file's current patch, and
+    // flagged as being about the file, since it was not written for the step.
+    const focused = flowGraph?.flow.nodes[flowSel];
+    const focusedFile = focused?.file ? files.find((f) => f.path === focused.file) : undefined;
+    const fileSummary = focusedFile && summaries[focusedFile.path];
+    const tip = !flowTips
+      ? null
+      : focused?.note
+      ? { text: focused.note, source: 'note' as const }
+      : fileSummary && focusedFile && fileSummary.hash === focusedFile.hash
+        ? { text: fileSummary.body, source: 'summary' as const }
+        : null;
+    return (
+      <Box flexDirection="column" width={columns} height={termRows}>
+        <FlowPane
+          theme={theme}
+          width={columns}
+          height={contentHeight}
+          flow={flowGraph?.flow ?? null}
+          layout={flowGraph?.layout ?? null}
+          status={status}
+          stale={flowStale}
+          author={storedFlow?.model ?? null}
+          selected={flowSel}
+          panX={flowPan.x}
+          panY={flowPan.y}
+          tick={tick}
+          tip={tip}
+        />
+        {statusBar}
+      </Box>
+    );
+  }
+
   return (
     <Box flexDirection="column" width={columns} height={termRows}>
       <Box height={contentHeight}>
@@ -758,7 +1082,14 @@ export function App(props: Props): React.ReactElement {
             scroll={top}
             hscroll={pos.hscroll}
             viewed={viewed.has(file.path)}
-            noteCount={noteCounts.get(file.path) ?? 0}
+            noteCount={peek ? 0 : (noteCounts.get(file.path) ?? 0)}
+            banner={
+              peek
+                ? peek.status === 'added'
+                  ? 'new, untracked — not in this diff (git add -N to include it) · esc back to flow'
+                  : 'unchanged — shown for context, not part of this diff · esc back to flow'
+                : undefined
+            }
           />
         ) : null}
       </Box>
@@ -766,17 +1097,7 @@ export function App(props: Props): React.ReactElement {
       {mode === 'confirm' && pending ? (
         <NoteInput theme={theme} width={columns} prompt={`${pending.prompt} y / n`} value="" />
       ) : null}
-      <StatusBar
-        theme={theme}
-        width={columns}
-        label={range.label}
-        branch={branch}
-        files={files.length}
-        additions={totals.additions}
-        deletions={totals.deletions}
-        layout={effectiveLayout}
-        message={message?.text ?? null}
-      />
+      {statusBar}
     </Box>
   );
 }

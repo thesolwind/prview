@@ -36,6 +36,8 @@ interface Props {
   hscroll: number;
   viewed: boolean;
   noteCount: number;
+  /** Replaces the status and counts: says the file shown is not a change. */
+  banner?: string;
 }
 
 const digits = (n: number) => String(Math.max(n, 1)).length;
@@ -210,7 +212,7 @@ function ColumnBand({
 }
 
 export function DiffPane(props: Props): React.ReactElement {
-  const { file, oldLabel, newLabel, rows, tokens, theme, width, height, cursor, scroll, hscroll, viewed, noteCount } =
+  const { file, oldLabel, newLabel, rows, tokens, theme, width, height, cursor, scroll, hscroll, viewed, noteCount, banner } =
     props;
 
   const bodyHeight = Math.max(1, height - DIFF_HEADER_HEIGHT);
@@ -223,19 +225,23 @@ export function DiffPane(props: Props): React.ReactElement {
   const codeWidth = codeWidthFor(file, width, 'split');
   const uniCodeWidth = codeWidthFor(file, width, 'unified');
   // Room left for the path once the status and counts have taken theirs.
-  const headerRoom = Math.max(12, width - statusLabel(file).length - 24);
+  const headerRoom = Math.max(12, width - (banner ? Math.min(banner.length + 4, width - 12) : statusLabel(file).length + 24));
 
   return (
     <Box flexDirection="column" width={width} height={height}>
       <Row
         width={width}
         segments={[
-          { text: viewed ? '✓ ' : '◻ ', color: viewed ? theme.addSign : theme.dim },
+          { text: banner ? '◇ ' : viewed ? '✓ ' : '◻ ', color: banner ? theme.accent : viewed ? theme.addSign : theme.dim },
           { text: fitRight(file.path, headerRoom), color: theme.plain, bold: true },
-          { text: `  ${statusLabel(file)}  `, color: theme.dim },
-          { text: `+${file.additions}`, color: theme.addSign },
-          { text: ' ', color: theme.dim },
-          { text: `−${file.deletions}`, color: theme.delSign },
+          ...(banner
+            ? [{ text: `  ${banner}`, color: theme.accent }]
+            : [
+                { text: `  ${statusLabel(file)}  `, color: theme.dim },
+                { text: `+${file.additions}`, color: theme.addSign },
+                { text: ' ', color: theme.dim },
+                { text: `−${file.deletions}`, color: theme.delSign },
+              ]),
           ...(noteCount > 0
             ? [{ text: `  ${noteCount} note${noteCount === 1 ? '' : 's'}`, color: theme.noteFg }]
             : []),

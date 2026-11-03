@@ -253,3 +253,28 @@ export function statusLabel(f: FileDiff): string {
     default: return 'modified';
   }
 }
+
+/** Lines past this are cut from a whole-file view; it is context, not a review. */
+const WHOLE_FILE_MAX_LINES = 20_000;
+
+/**
+ * A whole file dressed as a diff, so the diff pane can show a file the diff
+ * itself does not contain — a step the flow diagram drew for context, or a
+ * new file git does not track yet. Built from patch text and run through the
+ * real parser rather than assembled by hand, so tabs, numbering and the hash
+ * come out exactly as they would for a real diff.
+ *
+ * `context` shows every line unchanged; `added` shows every line as new.
+ */
+export function wholeFile(path: string, text: string, kind: 'context' | 'added', tabWidth = 4): FileDiff | null {
+  const lines = text.replace(/\r\n/g, '\n').replace(/\n$/, '').split('\n').slice(0, WHOLE_FILE_MAX_LINES);
+  if (!text.length) return null;
+  const n = lines.length;
+  const sign = kind === 'added' ? '+' : ' ';
+  const header =
+    kind === 'added'
+      ? `diff --git a/${path} b/${path}\nnew file mode 100644\n--- /dev/null\n+++ b/${path}\n@@ -0,0 +1,${n} @@\n`
+      : `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n@@ -1,${n} +1,${n} @@\n`;
+  const raw = header + lines.map((l) => sign + l).join('\n') + '\n';
+  return parseDiff(raw, tabWidth)[0] ?? null;
+}

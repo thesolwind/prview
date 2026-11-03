@@ -52,6 +52,10 @@ export interface WorkingProps {
   done: number;
   model: string;
   elapsedSeconds: number;
+  /** Overrides for work other than a summary batch (the diff flow). */
+  title?: string;
+  stage?: string;
+  hint?: string;
 }
 
 /**
@@ -65,23 +69,25 @@ export interface WorkingProps {
  */
 export function Working(props: WorkingProps): React.ReactElement {
   const { theme, width, height, tick, total, done, model, elapsedSeconds } = props;
+  const title = props.title ?? `ANALYSING ${total} DIFF${total === 1 ? '' : 'S'}`;
 
   const spin = SPINNER[tick % SPINNER.length] ?? SPINNER[0]!;
   // Chunk counts are not shown: a chunk is all-or-nothing, so the number sits
   // at zero and then jumps, which says less than the stage name does.
   const stage =
-    done >= total && total > 0
+    props.stage ??
+    (done >= total && total > 0
       ? 'writing summaries'
       : done > 0
         ? `reading batch (${done} of ${total} back)`
-        : 'sending batch';
+        : 'sending batch');
 
   return (
     <Box width={width} height={height} alignItems="center" justifyContent="center">
       <Box flexDirection="column" borderStyle="double" borderColor={theme.accent} paddingX={2}>
         <Text>
           <Text color={theme.accent} bold>
-            {`${spin}  ANALYSING ${total} DIFF${total === 1 ? '' : 'S'}`}
+            {`${spin}  ${title}`}
           </Text>
         </Text>
         <Text> </Text>
@@ -93,7 +99,7 @@ export function Working(props: WorkingProps): React.ReactElement {
         </Text>
         <Text> </Text>
         <Text color={theme.dim}>{`${stage} · ${model} · ${elapsedSeconds}s`}</Text>
-        <Text color={theme.dim}>esc cancels · q quits</Text>
+        <Text color={theme.dim}>{props.hint ?? 'esc cancels · q quits'}</Text>
       </Box>
     </Box>
   );

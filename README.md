@@ -1,6 +1,7 @@
 # prview
 
 [![npm version](https://img.shields.io/npm/v/@thesolwind/prview)](https://www.npmjs.com/package/@thesolwind/prview)
+[![status: beta](https://img.shields.io/badge/status-beta-orange)](CHANGELOG.md)
 
 **A GitHub-style diff reviewer for your terminal, built for reviewing what
 your AI agent just changed.** Split-pane view, syntax colours that match
@@ -74,6 +75,7 @@ context/layout options, and everything else.
 | `o` | quit and open `$EDITOR` at this line |
 | `w` | write notes to `prview-notes.md` |
 | `r` | re-read the diff from git (or run with `--watch` to have it refresh on its own) |
+| `f` | **diff flow** tab: a diagram of the code path the change touches |
 | `esc` | cancel a running explain |
 | `?` `q` | help / quit |
 
@@ -82,10 +84,21 @@ review.
 
 ## Generated explanations
 
-`--explain` sends the diff to the `claude` CLI (Haiku 4.5 by default) in a few
+`--explain` sends the diff to the `claude` CLI (Opus by default) in a few
 batched requests and shows a one-line summary above each file. It is **off by
 default**: pass `--explain` per run, or set `PRVIEW_EXPLAIN=1`. Summaries are
 cached per file version, so re-opening a review sends nothing.
+
+With `--explain` on, `f` also opens the **diff flow**: one more request
+draws the flow the change sits on (entry points, the functions it touches,
+what they call) as boxes and arrows in the terminal, with changed steps
+tagged `[~]`, new ones `[+]` and removed ones `[−]`. `j`/`k` step through it,
+`n`/`p` jump between changed steps, a tip beside the focused step says what
+it does (`t` hides it), and `enter` opens that step's file at its
+definition — read-only, with `esc` back to the flow, when the file is
+unchanged or not yet tracked. It is
+drawn the first time you open the tab, not at startup, and `w` exports it as
+a Mermaid block that GitHub renders.
 
 📖 See [how `--explain` works](docs/explain.md) for batching, what is skipped, and the limits.
 
@@ -103,6 +116,7 @@ changes. `prview <range> --reset summaries|viewed|notes|all` clears one kind.
 | 📖 [Every flag](docs/flags.md) | the full CLI reference |
 | 🤖 [How `--explain` works](docs/explain.md) | the `claude` CLI call, batching, caching and limits |
 | 🧩 [The annotate-for-review skill](docs/annotate-for-review.md) | let a Claude Code session leave notes on its own changes |
+| 📝 [Changelog](CHANGELOG.md) | what changed in each version, and which are on npm |
 
 ## Development
 

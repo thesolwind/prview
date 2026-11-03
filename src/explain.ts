@@ -19,7 +19,16 @@ import { dirname } from 'node:path';
 
 import type { FileDiff } from './parse';
 
-export const DEFAULT_EXPLAIN_MODEL = 'claude-haiku-4-5-20251001';
+/**
+ * Opus, like the diff flow. Haiku was the default for speed and cost, but a
+ * summary is the first thing a reviewer reads about a file, and a wrong one
+ * is worse than none: it shapes the reading of the code below it. Summaries
+ * are cached per file version, so the larger model is paid for once per
+ * change, not once per look. The alias, not a dated id, so it follows
+ * whatever the claude CLI currently calls Opus; `--explain-model haiku` is
+ * the fast, cheap choice.
+ */
+export const DEFAULT_EXPLAIN_MODEL = 'opus';
 
 /** Per-file diff text handed to the model; longer patches are truncated. */
 const MAX_PATCH_CHARS = 24_000;
@@ -35,10 +44,12 @@ const MAX_PATCH_CHARS = 24_000;
 export const DEFAULT_MAX_FILES = 200;
 /**
  * A batch is legitimately slower than a single file — it has to read every
- * diff and write a line per file — so this is generous. Quitting kills the
- * request anyway, so a long ceiling costs nothing in responsiveness.
+ * diff and write a line per file — so this is generous: five minutes, since
+ * Opus reading a full 60k-character batch can take most of two. Quitting
+ * kills the request anyway, so a long ceiling costs nothing in
+ * responsiveness.
  */
-const TIMEOUT_MS = 120_000;
+const TIMEOUT_MS = 300_000;
 
 /**
  * One request covers many files, so the reply has to be parseable per file.
@@ -58,7 +69,7 @@ const PROMPT = [
 ].join(' ');
 
 /**
- * Characters of diff per request. Haiku has a 200k-token window; this keeps a
+ * Characters of diff per request. The models have a 200k-token window; this keeps a
  * request an order of magnitude inside it while still covering most branches
  * in one go.
  */
@@ -205,7 +216,9 @@ async function logFailure(logPath: string | undefined, detail: string): Promise<
   }
 }
 
-function runClaude(
+/** One `claude -p` call with no tools: the model sees only what is on stdin. */
+export function runClaude(
+  prompt: string,
   patch: string,
   options: Explainer,
   signal: AbortSignal,
@@ -214,7 +227,7 @@ function runClaude(
   return new Promise((resolve, reject) => {
     const child = execFile(
       'claude',
-      ['-p', PROMPT, '--model', options.model, '--allowed-tools', ''],
+      ['-p', prompt, '--model', options.model, '--allowed-tools', ''],
       { cwd: options.cwd, timeout: TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024, encoding: 'utf8', signal },
       (err, stdout, stderr) => {
         if (err) {
@@ -246,6 +259,8 @@ export interface Explainer {
   maxFiles: number;
   /** Where to append full failure detail, since a status bar cannot hold it. */
   logPath?: string;
+  /** Model for the diff flow; DEFAULT_FLOW_MODEL when unset. */
+  flowModel?: string;
 }
 
 /**
@@ -286,6 +301,7 @@ export async function explainAll(
     if (signal.aborted) return { sent: done, overCap };
     const expected = new Set(chunk.map((f) => f.path));
     const raw = await runClaude(
+      PROMPT,
       buildRequest(chunk),
       options,
       signal,

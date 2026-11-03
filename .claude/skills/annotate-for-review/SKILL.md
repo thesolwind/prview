@@ -121,6 +121,19 @@ JSON
 - Re-running replaces the notes you previously wrote on the paths you write
   again, so refresh freely after further edits. Pass `"replace": false` to add
   without clearing.
+- Optionally add `"flow"`: a Mermaid flowchart of the code path you changed,
+  which the reader sees with `f`. Use only this subset, one statement per line:
+  `flowchart TD`; nodes `id["Label"]`; edges `a --> b` or `a -->|label| b`;
+  `class id1,id2 changed` / `added` / `removed` for the steps you touched;
+  an edge label says when the step happens ("on save") or what is passed
+  ("parsed rows"), never a bare key name, which reads like a key hint
+  (unmarked steps are context); and `%% file: <id> <path>` for each step that
+  lives in a file of the diff, so `enter` can open it. Add
+  `%% note: <id> <one sentence>` for every step: what it does and, for a
+  touched step, what you changed about it — the reader sees it as a tip
+  when the step is focused, so it is where the "why" of each step goes. Keep it to the path the
+  change sits on — 6 to 20 nodes — not a map of the whole program. Worth it
+  when the change spans several files; skip it for a one-file edit.
 - It exits non-zero with a specific message on a malformed payload. Fix and
   retry rather than falling back to editing `reviews.json` by hand.
 
